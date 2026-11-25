@@ -1,5 +1,7 @@
 # WorkSphere — Multi-Tenant SaaS Project Management & Collaboration Platform
 
+> **Live Production Demo (Vercel)**: [https://worksphere-tan.vercel.app](https://worksphere-tan.vercel.app)
+
 **WorkSphere** คือแพลตฟอร์มบริหารโปรเจกต์และทำงานร่วมกันระดับองค์กรสไตล์ **Jira + Trello** ที่พัฒนาขึ้นตั้งแต่ศูนย์ด้วย **Next.js 16 (TypeScript), PostgreSQL (Prisma 7), Redis, BullMQ และ Socket.IO** โดยออกแบบและเขียนระบบ Authentication, Session Rotation, 4-Tier RBAC, Multi-Tenant Isolation, Optimistic Locking และ DAG Dependency Engine ด้วยตัวเองทั้งหมดโดยไม่พึ่งพา Auth-as-a-Service
 
 ---
