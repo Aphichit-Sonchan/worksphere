@@ -73,6 +73,11 @@ export async function checkRateLimit(
 }
 
 export function getClientIp(request: Request): string {
+  // บน Vercel Edge เฮดเดอร์ `x-vercel-forwarded-for` ถูกเขียนทับโดยแพลตฟอร์มเสมอ ป้องกันการปลอมแปลง X-Forwarded-For
+  const vercelIp = request.headers.get("x-vercel-forwarded-for");
+  if (vercelIp) {
+    return vercelIp.split(",")[0]?.trim() || "unknown";
+  }
   const forwarded = request.headers.get("x-forwarded-for");
   if (forwarded) {
     return forwarded.split(",")[0]?.trim() || "unknown";

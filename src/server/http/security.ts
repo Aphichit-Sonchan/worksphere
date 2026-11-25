@@ -34,4 +34,14 @@ export const SECURITY_HEADERS: Record<string, string> = {
   "X-Frame-Options": "DENY",
   "Referrer-Policy": "strict-origin-when-cross-origin",
   "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+  "Content-Security-Policy":
+    "frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'",
 };
+
+/**
+ * ป้องกัน Protocol-Relative Open Redirect เช่น `?next=//evil.com` หรือ `?next=/\evil.com`
+ */
+export function isSafeInternalRedirect(next: string | null | undefined): next is string {
+  if (!next) return false;
+  return next.startsWith("/") && !next.startsWith("//") && !next.includes("\\");
+}

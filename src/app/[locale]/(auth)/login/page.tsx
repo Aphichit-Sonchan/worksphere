@@ -40,7 +40,7 @@ function LoginForm() {
       }
       await queryClient.invalidateQueries({ queryKey: ["auth-me"] });
       const next = searchParams.get("next");
-      if (next && next.startsWith("/")) {
+      if (next && next.startsWith("/") && !next.startsWith("//") && !next.includes("\\")) {
         window.location.assign(next);
       } else {
         router.push("/app");

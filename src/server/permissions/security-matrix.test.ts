@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { isSafeInternalRedirect, SECURITY_HEADERS } from "@/server/http/security";
+import { getClientIp } from "@/server/infra/rate-limit";
 import type { AuthRepository, AuthUserRecord } from "@/server/modules/auth/auth.repository";
 import { buildAuthSetCookies, buildClearAuthCookies } from "@/server/modules/auth/cookies";
 import { signAccessToken, verifyAccessToken } from "@/server/modules/auth/crypto";
@@ -202,5 +204,23 @@ describe("4-Tier RBAC Permission Matrix & Token Abuse Security Suite (WS-704)", 
         disabledRepo,
       ),
     ).rejects.toMatchObject({ status: 401, message: "User account is disabled" });
+  });
+
+  it("blocks protocol-relative open redirects, enforces CSP frame-ancestors, and trusts x-vercel-forwarded-for", () => {
+    expect(isSafeInternalRedirect("/th/app/projects")).toBe(true);
+    expect(isSafeInternalRedirect("//evil-phishing.invalid")).toBe(false);
+    expect(isSafeInternalRedirect("/\\evil-phishing.invalid")).toBe(false);
+    expect(isSafeInternalRedirect("https://evil-phishing.invalid")).toBe(false);
+    expect(isSafeInternalRedirect(null)).toBe(false);
+
+    expect(SECURITY_HEADERS["Content-Security-Policy"]).toContain("frame-ancestors 'none'");
+
+    const spoofAttemptReq = new Request("https://worksphere-tan.vercel.app/api/v1/auth/login", {
+      headers: {
+        "x-forwarded-for": "1.2.3.4",
+        "x-vercel-forwarded-for": "203.0.113.77",
+      },
+    });
+    expect(getClientIp(spoofAttemptReq)).toBe("203.0.113.77");
   });
 });
