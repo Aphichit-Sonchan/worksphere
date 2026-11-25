@@ -25,7 +25,15 @@ const envSchema = z.object({
 export type ServerEnv = z.infer<typeof envSchema>;
 
 export function parseServerEnv(raw: NodeJS.ProcessEnv): ServerEnv {
-  const parsed = envSchema.parse(raw);
+  const inferredVercelUrl =
+    raw.VERCEL_PROJECT_PRODUCTION_URL || raw.VERCEL_URL
+      ? `https://${raw.VERCEL_PROJECT_PRODUCTION_URL || raw.VERCEL_URL}`
+      : undefined;
+
+  const parsed = envSchema.parse({
+    ...raw,
+    APP_URL: raw.APP_URL || inferredVercelUrl,
+  });
 
   if (parsed.NODE_ENV === "production") {
     if (!parsed.DATABASE_URL) {

@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { getEnv } from "@/server/env";
 
@@ -48,8 +49,12 @@ let adapterInstance: StorageAdapter | null = null;
 export function getStorage(): StorageAdapter {
   if (!adapterInstance) {
     const env = getEnv();
-    // S3-compatible driver จะขยายเพิ่มใน Phase 4 (WS-406) เมื่อเชื่อมไฟล์แนบจริง
-    adapterInstance = new LocalDiskStorageAdapter(env.LOCAL_STORAGE_DIR);
+    // บน Vercel Serverless โฟลเดอร์โค้ด (/var/task) อ่านได้อย่างเดียว จึงต้องเขียนลง os.tmpdir() (/tmp) แทนเมื่อใช้โหมด local
+    const writableDir =
+      process.env.VERCEL && env.LOCAL_STORAGE_DIR === ".local-storage"
+        ? path.join(os.tmpdir(), "worksphere-storage")
+        : env.LOCAL_STORAGE_DIR;
+    adapterInstance = new LocalDiskStorageAdapter(writableDir);
   }
   return adapterInstance;
 }
