@@ -1,0 +1,81 @@
+name: WorkSphere CI/CD Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: worksphere-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_ENV: test
+  APP_URL: http://localhost:3000
+  AUTH_SECRET: ci-test-secret-minimum-32-characters-long-key
+  DATABASE_URL: postgresql://worksphere:worksphere@localhost:5432/worksphere?schema=public
+  STORAGE_DRIVER: local
+  MAIL_DRIVER: console
+
+jobs:
+  quality-and-tests:
+    name: Lint, Typecheck, Security & Load Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma Client
+        run: npx prisma generate
+
+      - name: Run ESLint
+        run: npm run lint
+
+      - name: Run TypeScript & Route Typecheck
+        run: npm run typecheck
+
+      - name: Run Unit, Integration & 4-Role Security Matrix Suite
+        run: npm test
+
+      - name: Execute 100-VU Concurrent Load Smoke Benchmark
+        run: npm run test:load
+
+      - name: Build Production Next.js Bundle
+        env:
+          NODE_ENV: production
+        run: npm run build
+
+  deploy-migrations:
+    name: Production Database Migration
+    needs: quality-and-tests
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.ENABLE_AUTO_MIGRATE == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Apply Prisma Production Migrations
+        env:
+          DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+        run: npx prisma migrate deploy

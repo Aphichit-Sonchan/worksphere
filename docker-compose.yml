@@ -1,0 +1,54 @@
+# Optional local backing services สำหรับเครื่องที่ติดตั้ง Docker หรือใช้บน CI
+# เครื่องที่ไม่มี Docker สามารถใช้ Neon (DATABASE_URL) + Upstash (REDIS_URL) แทนได้โดยตรง
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: worksphere-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: worksphere
+      POSTGRES_PASSWORD: worksphere
+      POSTGRES_DB: worksphere
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U worksphere -d worksphere"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: worksphere-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  minio:
+    image: minio/minio:latest
+    container_name: worksphere-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: worksphere
+      MINIO_ROOT_PASSWORD: worksphere-secret
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:

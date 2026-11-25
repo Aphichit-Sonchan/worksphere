@@ -1,0 +1,452 @@
+// WorkSphere Prisma Schema — ตรงตาม docs/erd.md (WS-004, WS-103)
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ───────────── Enums ─────────────
+
+enum SystemRole {
+  SYSTEM_ADMIN
+  USER
+}
+
+enum OrgRole {
+  ORG_OWNER
+  ORG_ADMIN
+  MEMBER
+}
+
+enum WorkspaceRole {
+  WORKSPACE_ADMIN
+  MEMBER
+}
+
+enum ProjectRole {
+  PROJECT_MANAGER
+  MEMBER
+  VIEWER
+}
+
+enum ColumnCategory {
+  TODO
+  IN_PROGRESS
+  DONE
+}
+
+enum TaskPriority {
+  LOWEST
+  LOW
+  MEDIUM
+  HIGH
+  HIGHEST
+}
+
+enum VerificationPurpose {
+  EMAIL_VERIFY
+  PASSWORD_RESET
+}
+
+enum NotificationType {
+  TASK_ASSIGNED
+  MENTIONED
+  STATUS_CHANGED
+  INVITED
+}
+
+enum Locale {
+  th
+  en
+}
+
+// ───────────── Identity & Auth ─────────────
+
+model User {
+  id              String     @id @default(cuid())
+  email           String     @unique // เก็บเป็นตัวพิมพ์เล็กเสมอ
+  name            String
+  avatarUrl       String?
+  passwordHash    String // Argon2id
+  systemRole      SystemRole @default(USER)
+  locale          Locale     @default(th)
+  emailVerifiedAt DateTime?
+  disabledAt      DateTime?
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  sessions            Session[]
+  verificationTokens  VerificationToken[]
+  orgMemberships      OrganizationMember[]
+  workspaceMembers    WorkspaceMember[]
+  projectMembers      ProjectMember[]
+  invitationsSent     Invitation[]         @relation("InvitedBy")
+  createdOrgs         Organization[]       @relation("OrgCreatedBy")
+  createdWorkspaces   Workspace[]          @relation("WorkspaceCreatedBy")
+  createdProjects     Project[]            @relation("ProjectCreatedBy")
+  reportedTasks       Task[]               @relation("TaskReporter")
+  assignedTasks       Task[]               @relation("TaskAssignee")
+  createdDependencies TaskDependency[]     @relation("DependencyCreatedBy")
+  comments            Comment[]
+  attachments         Attachment[]
+  activities          ActivityLog[]
+  notifications       Notification[]
+}
+
+/// รองรับ Refresh Token Rotation + Reuse Detection ผ่าน familyId
+model Session {
+  id                  String    @id @default(cuid())
+  userId              String
+  familyId            String
+  refreshTokenHash    String    @unique // SHA-256 hex
+  replacedByTokenHash String?
+  revokedAt           DateTime?
+  expiresAt           DateTime
+  ipAddress           String?
+  userAgent           String?
+  createdAt           DateTime  @default(now())
+  lastUsedAt          DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([familyId])
+  @@index([expiresAt])
+}
+
+model VerificationToken {
+  id         String              @id @default(cuid())
+  userId     String
+  purpose    VerificationPurpose
+  tokenHash  String              @unique // SHA-256 hex
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime            @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, purpose])
+}
+
+// ───────────── Organization & Workspace (Multi-tenancy) ─────────────
+
+model Organization {
+  id          String    @id @default(cuid())
+  name        String
+  slug        String    @unique
+  createdById String
+  suspendedAt DateTime?
+  deletedAt   DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  createdBy     User                 @relation("OrgCreatedBy", fields: [createdById], references: [id])
+  members       OrganizationMember[]
+  invitations   Invitation[]
+  workspaces    Workspace[]
+  projects      Project[]
+  tasks         Task[]
+  comments      Comment[]
+  attachments   Attachment[]
+  activities    ActivityLog[]
+  notifications Notification[]
+}
+
+model OrganizationMember {
+  id        String   @id @default(cuid())
+  orgId     String
+  userId    String
+  role      OrgRole  @default(MEMBER)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, userId])
+  @@index([userId])
+}
+
+model Invitation {
+  id          String    @id @default(cuid())
+  orgId       String
+  workspaceId String?
+  email       String
+  role        OrgRole   @default(MEMBER)
+  tokenHash   String    @unique
+  invitedById String
+  expiresAt   DateTime
+  acceptedAt  DateTime?
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  workspace Workspace?   @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+  invitedBy User         @relation("InvitedBy", fields: [invitedById], references: [id])
+
+  @@index([orgId, email])
+}
+
+model Workspace {
+  id          String    @id @default(cuid())
+  orgId       String
+  name        String
+  slug        String
+  description String?
+  createdById String
+  archivedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  org         Organization      @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  createdBy   User              @relation("WorkspaceCreatedBy", fields: [createdById], references: [id])
+  members     WorkspaceMember[]
+  projects    Project[]
+  invitations Invitation[]
+  activities  ActivityLog[]
+
+  @@unique([orgId, slug])
+  @@index([orgId])
+}
+
+model WorkspaceMember {
+  id          String        @id @default(cuid())
+  workspaceId String
+  userId      String
+  role        WorkspaceRole @default(MEMBER)
+  createdAt   DateTime      @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+  @@index([userId])
+}
+
+// ───────────── Projects & Kanban Board ─────────────
+
+model Project {
+  id          String    @id @default(cuid())
+  orgId       String // denormalized tenant key
+  workspaceId String
+  key         String // เช่น "WS" -> task key "WS-42"
+  name        String
+  description String?
+  taskCounter Int       @default(0)
+  createdById String
+  archivedAt  DateTime?
+  deletedAt   DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  org          Organization     @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  workspace    Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy    User             @relation("ProjectCreatedBy", fields: [createdById], references: [id])
+  members      ProjectMember[]
+  columns      BoardColumn[]
+  tasks        Task[]
+  dependencies TaskDependency[]
+  tags         Tag[]
+  activities   ActivityLog[]
+
+  @@unique([orgId, key])
+  @@index([workspaceId, archivedAt])
+  @@index([orgId])
+}
+
+model ProjectMember {
+  id        String      @id @default(cuid())
+  projectId String
+  userId    String
+  role      ProjectRole @default(MEMBER)
+  createdAt DateTime    @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, userId])
+  @@index([userId])
+}
+
+model BoardColumn {
+  id        String         @id @default(cuid())
+  projectId String
+  name      String
+  category  ColumnCategory @default(TODO)
+  position  String // fractional index
+  wipLimit  Int?
+  createdAt DateTime       @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  tasks   Task[]
+
+  @@index([projectId, position])
+}
+
+// ───────────── Tasks, Subtasks & Dependencies ─────────────
+
+model Task {
+  id          String       @id @default(cuid())
+  orgId       String // denormalized tenant key
+  projectId   String
+  columnId    String
+  parentId    String? // Subtask self-relation
+  number      Int
+  title       String
+  description String?
+  priority    TaskPriority @default(MEDIUM)
+  position    String // fractional index ภายในคอลัมน์
+  version     Int          @default(1) // Optimistic locking
+  assigneeId  String?
+  reporterId  String
+  dueDate     DateTime?
+  completedAt DateTime?
+  deletedAt   DateTime?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  org         Organization     @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project     Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  column      BoardColumn      @relation(fields: [columnId], references: [id])
+  parent      Task?            @relation("TaskSubtasks", fields: [parentId], references: [id], onDelete: SetNull)
+  subtasks    Task[]           @relation("TaskSubtasks")
+  assignee    User?            @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  reporter    User             @relation("TaskReporter", fields: [reporterId], references: [id])
+  blockedBy   TaskDependency[] @relation("DependentTask")
+  blocks      TaskDependency[] @relation("BlockingTask")
+  tags        TaskTag[]
+  comments    Comment[]
+  attachments Attachment[]
+  activities  ActivityLog[]
+
+  @@unique([projectId, number])
+  @@index([columnId, deletedAt, position])
+  @@index([projectId, deletedAt, priority, assigneeId, createdAt])
+  @@index([orgId, deletedAt, completedAt])
+  @@index([dueDate, completedAt, deletedAt])
+  @@index([orgId])
+  @@index([parentId])
+}
+
+model TaskDependency {
+  id              String   @id @default(cuid())
+  projectId       String
+  taskId          String // งานปลายทางที่ต้องรอ
+  dependsOnTaskId String // งานต้นทางที่ต้องเสร็จก่อน
+  createdById     String
+  createdAt       DateTime @default(now())
+
+  project       Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  task          Task    @relation("DependentTask", fields: [taskId], references: [id], onDelete: Cascade)
+  dependsOnTask Task    @relation("BlockingTask", fields: [dependsOnTaskId], references: [id], onDelete: Cascade)
+  createdBy     User    @relation("DependencyCreatedBy", fields: [createdById], references: [id])
+
+  @@unique([taskId, dependsOnTaskId])
+  @@index([projectId])
+  @@index([dependsOnTaskId])
+}
+
+model Tag {
+  id        String @id @default(cuid())
+  projectId String
+  name      String
+  color     String // hex เช่น "#2563eb"
+
+  project Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  tasks   TaskTag[]
+
+  @@unique([projectId, name])
+}
+
+model TaskTag {
+  taskId String
+  tagId  String
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  tag  Tag  @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([taskId, tagId])
+}
+
+// ───────────── Collaboration, Audit & Notifications ─────────────
+
+model Comment {
+  id        String    @id @default(cuid())
+  orgId     String
+  taskId    String
+  authorId  String
+  body      String
+  editedAt  DateTime?
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  org    Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  task   Task         @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  author User         @relation(fields: [authorId], references: [id])
+
+  @@index([taskId, createdAt])
+  @@index([orgId])
+}
+
+model Attachment {
+  id         String   @id @default(cuid())
+  orgId      String
+  taskId     String
+  uploaderId String
+  fileName   String
+  mimeType   String
+  sizeBytes  Int
+  storageKey String   @unique
+  createdAt  DateTime @default(now())
+
+  org      Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  task     Task         @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  uploader User         @relation(fields: [uploaderId], references: [id])
+
+  @@index([taskId])
+  @@index([orgId])
+}
+
+model ActivityLog {
+  id          String   @id @default(cuid())
+  orgId       String
+  workspaceId String?
+  projectId   String?
+  taskId      String?
+  actorId     String
+  action      String // เช่น "task.moved", "member.invited"
+  metadata    Json?
+  createdAt   DateTime @default(now())
+
+  org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  workspace Workspace?   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project   Project?     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  task      Task?        @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  actor     User         @relation(fields: [actorId], references: [id])
+
+  @@index([projectId, createdAt])
+  @@index([orgId, createdAt])
+  @@index([taskId, createdAt])
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  orgId     String
+  userId    String
+  type      NotificationType
+  title     String
+  linkUrl   String?
+  payload   Json
+  readAt    DateTime?
+  createdAt DateTime         @default(now())
+
+  org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt, createdAt])
+  @@index([orgId])
+}
